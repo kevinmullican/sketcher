@@ -33,6 +33,10 @@ struct vect {
   vect (const vect &v) {
     x = v.x; y = v.y; z = v.z;
   }
+  vect &set (double _x, double _y, double _z) {
+    x = _x; y = _y; z = _z;
+    return *this;
+  }
   vect cross(const vect &v) {
     vect c;
     c.x = (v.y * z) - (v.z * y);
@@ -76,8 +80,17 @@ struct beam {
   vect p1;
   vect p2;
   beam() {}
-  beam(vect _p1, vect _p2) { p1 = _p1; p2 = _p2; }
-  beam(const beam &b) { p1 = b.p1; p2 = b.p2; }
+  beam(vect _p1, vect _p2) {
+    p1 = _p1; p2 = _p2;
+  }
+  beam(const beam &b) {
+    p1 = b.p1; p2 = b.p2;
+  }
+  beam &set(const vect &_p1, const vect &_p2) {
+    p1 = _p1;
+    p2 = _p2;
+    return *this;
+  }
   beam &operator= (const beam &b) {
     p1 = b.p1;
     p2 = b.p2;
@@ -85,7 +98,7 @@ struct beam {
   }
   bool operator== (const beam &b) const {
     if (p1 == b.p1 && p2 == b.p2) return true;
-    if (p1 == b.p2 && p1 == b.p1) return true;
+    if (p1 == b.p2 && p2 == b.p1) return true;
     return false;
   }
 };
@@ -105,22 +118,13 @@ struct triangle {
     p2 = t.p2;
     p3 = t.p3;
   }
-  triangle& operator= (const triangle &t) {
-    p1 = t.p1; p2 = t.p2; p3 = t.p3;
+  triangle &set (vect _p1, vect _p2, vect _p3) {
+    p1 = _p1;
+    p2 = _p2;
+    p3 = _p3;
     return *this;
   }
-  bool operator== (const triangle &t) const {
-    if (p1 == t.p1 && p2 == t.p2 && p3 == t.p3)
-      return true;
-    return false;
-  }
-  vect normal() {
-    vect pp2 = p2 - p1;
-    vect pp3 = p3 - p1;
-    vect cr = pp2 . cross (pp3);
-    return cr.norm();
-  }
-  int sharedPoints(const triangle &t) {
+  int sharedPoints(const triangle &t) const {
     int same = 0;
     if (p1 == t.p1 || p1 == t.p2 || p1 == t.p3)
       same++;
@@ -129,6 +133,12 @@ struct triangle {
     if (p3 == t.p1 || p3 == t.p2 || p3 == t.p3)
       same++;
     return same;
+  }
+  vect normal() {
+    vect pp2 = p2 - p1;
+    vect pp3 = p3 - p1;
+    vect cr = pp2 . cross (pp3);
+    return cr.norm();
   }
   bool touching(const triangle &t) {
     if (sharedPoints(t) == 1) return true;
@@ -149,12 +159,66 @@ struct triangle {
     if (tn == n.neg()) return true;
     return false;
   }
+  bool contains (const vect &pt) const {
+    if (pt == p1 || pt == p2 || pt == p3)
+      return true;
+    return false;
+  }
+  triangle& operator= (const triangle &t) {
+    p1 = t.p1; p2 = t.p2; p3 = t.p3;
+    return *this;
+  }
+  bool operator== (const triangle &t) const {
+    if (sharedPoints(t) == 3)
+      return true;
+    return false;
+  }
 };
 
 vect VectFromNodesAt (vector <double> &nodes, const int at) {
   int idx = at * 3;
   vect v (nodes [idx], nodes [idx+1], nodes [idx+2]);
   return v;
+}
+
+bool containsBeam(const vector <beam> &beams, const beam &theBeam) {
+  for (int i = 0; i < beams . size (); ++i) {
+    if (beams[i] == theBeam)
+      return true;
+  }
+  return false;
+}
+
+void addUniqueBeam(vector <beam> &beams, const beam &theBeam) {
+  if (! containsBeam(beams, theBeam))
+    beams . push_back (theBeam);
+}
+
+bool oppositePoints(beam &theBeam, const triangle &t1, const triangle &t2) {
+  int shared = t1 . sharedPoints (t2);
+  if (shared != 2) {
+    printf ("shared: %d\n", shared);
+    return false;
+  }
+
+  vect p1;
+  if (! t2.contains(t1.p1))
+    p1 = t1.p1;
+  else if (! t2.contains(t1.p2))
+    p1 = t1.p2;
+  else if (! t2.contains(t1.p3))
+    p1 = t1.p3;
+
+  vect p2;
+  if (! t1.contains(t2.p1))
+    p2 = t2.p1;
+  else if (! t1.contains(t2.p1))
+    p2 = t2.p1;
+  else if (! t1.contains(t2.p1))
+    p2 = t2.p1;
+
+  theBeam.set(p1, p2);
+  return true;
 }
 
 vector <unsigned int> UintSplit (string str, const char *delim) {
@@ -318,7 +382,33 @@ int main (int argc, char **argv) {
   
   vector <beam> beams;
   for (int i = 0; i < triangles . size (); ++i) {
+    triangle t1 = triangles [i];
+    // all triangle edges are beams
+    addUniqueBeam(beams, beam(t1.p1, t1.p2));
+    addUniqueBeam(beams, beam(t1.p2, t1.p3));
+    addUniqueBeam(beams, beam(t1.p3, t1.p1));
+    // for adjacent, co-planar triangles,
+    // add the beam between the opposing points
+    for (int j = 0; j < triangles . size (); ++j) {
+      // continue if same triangle
+      if (i == j) continue;
+      triangle t2 = triangles [j];
+      // continue if not co-planer
+      if (! t2.coplaner(t1)) {
+        //printf ("not coplanar\n");
+        continue;
+      }
+      beam theBeam;
+      if (oppositePoints(theBeam, t1, t2)) {
+          printf ("opposite beam\n");
+          addUniqueBeam(beams, theBeam);
+      } else {
+        printf ("not opposite\n");
+      }
+    }
   }
+
+  printf ("extracted %d beams\n", (int)beams . size ());
 
   return 0;
 }
