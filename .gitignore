@@ -1,4 +1,8 @@
+.project
+.cproject
 *.swp
 *.o
 *.a
+*.jbeam
+*.json
 sketcher
